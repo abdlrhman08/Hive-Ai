@@ -19,6 +19,25 @@ class Board:
         self._hands = {}
         self.initiate_game()
 
+    def get_board_representation(self):
+        
+        board_representation = [None] * 23
+        pointers = {
+            "Queen": [0, 11],
+            "Ant": [1, 12],
+            "Grasshopper": [4, 15],
+            "Beetle": [7, 18],
+            "Spider": [9, 20]
+        }
+
+        for location, piece in self._objects.items():
+            pointer = pointers[piece.__class__.__name__][piece._team]
+            board_representation[pointer] = location
+            pointers[piece.__class__.__name__][piece._team] += 1
+
+        board_representation[22] = self._turn_number % 2
+        return board_representation
+
     def turn(self):
         """
         Determines whose turn it is to play.
@@ -51,25 +70,25 @@ class Board:
         deploy_locations = self.getPossibleDeployLocations(team_number)
         flag=1
 
-        if (self._turn_number == 7 and team_number == 0) or (self._turn_number == 8 and team_number == 1):
+        if (self._turn_number == 6 and team_number == 0) or (self._turn_number == 7 and team_number == 1):
             if available_pieces.get(Queen, 0) > 0:  # If Queen is still in hand
                 flag=0
                 for location in deploy_locations:
                     combined_results.append(('Queen', location))
         
         if(flag):
+            team_pieces = self.filter_team_pieces()
+
+            for location, piece in team_pieces.items():
+                possible_destinations = piece.get_next_possible_locations(self)
+
+                for destination in possible_destinations:
+                    combined_results.append((location, destination))
+
             for piece_type, count in available_pieces.items():
                 if count > 0:
                     for location in deploy_locations:
                         combined_results.append((piece_type.__name__, location))
-
-        team_pieces = self.filter_team_pieces()
-
-        for location, piece in team_pieces.items():
-            possible_destinations = piece.get_next_possible_locations(self)
-
-            for destination in possible_destinations:
-                combined_results.append((location, destination))
 
         return combined_results
 
@@ -92,10 +111,9 @@ class Board:
         }
      
 
-    def add_object(self, game_object: GameObject):
+    def add_object(self, game_object: GameObject, ai = False):
         """
         Add a game object to the board. Validates placement rules before committing changes.
-        
         Ensures that:
         1. Queen must be played within the first 4 moves for each player
         2. If 4 moves pass without playing the queen, the next move MUST be a queen
@@ -107,7 +125,7 @@ class Board:
                 team_moves = sum(1 for loc, piece in self._objects.items() if piece.get_team() == current_team)
                 
                 if team_moves >= 3 and not isinstance(game_object, Queen):
-                    raise QueenNotPlayedException(f"Player {current_team + 1} must play their queen by the 4th move")
+                    raise QueenNotPlayedException(f"you must play queen by the 4th move")
 
             if isinstance(game_object, Queen):
                 self._queen_played[current_team] = True
@@ -117,13 +135,15 @@ class Board:
             self._hands[game_object.get_team()][game_object.__class__] -= 1
             self._turn_number += 1
 
-            if self._turn_number > 7:
+            if self._turn_number > 7 and not ai:
                 self.check_win_condition()
+                
+            # print("Board state: ", self._objects)
 
             return True  
 
         except QueenNotPlayedException as e:
-            self.alert_callback(str(e)) 
+            self.alert_callback(str(e), 'Okay') 
             return False
 
 
@@ -131,7 +151,7 @@ class Board:
         d = [(2, 0), (-2, 0), (1, 1), (-1, 1), (1, -1), (-1, -1)]
 
         for dx, dy in d:
-            test_location = self._queens_reference[0]._location
+            test_location = self._queens_reference[0].get_location()
             if not self.get_object(test_location.create_from_self(dx, dy)):
                 break
         else:
@@ -139,7 +159,7 @@ class Board:
             return
 
         for dx, dy in d:
-            test_location = self._queens_reference[1]._location
+            test_location = self._queens_reference[1].get_location()
             if not self.get_object(test_location.create_from_self(dx, dy)):
                 break
         else:
@@ -151,19 +171,19 @@ class Board:
 
         if self._queens_reference[0]:
             for dx, dy in d:
-                test_location = self._queens_reference[0]._location
-                if not self.get_object(test_location.create_from_self(dx, dy)):
-                    break
-            else:
-                return 1
-
-        if self._queens_reference[1]:
-            for dx, dy in d:
-                test_location = self._queens_reference[1]._location
+                test_location = self._queens_reference[0].get_location()
                 if not self.get_object(test_location.create_from_self(dx, dy)):
                     break
             else:
                 return -1
+
+        if self._queens_reference[1]:
+            for dx, dy in d:
+                test_location = self._queens_reference[1].get_location()
+                if not self.get_object(test_location.create_from_self(dx, dy)):
+                    break
+            else:
+                return 1
         
         return 0
 
@@ -198,7 +218,7 @@ class Board:
         self._hands[game_object.get_team()][game_object.__class__] += 1 # increase chosen object by one
         del self._objects[(location)]
 
-    def move_object(self, oldLocation, newLocation):
+    def move_object(self, oldLocation, newLocation, ai = False):
         """
         Move a game object from one position to another.
 
@@ -222,8 +242,11 @@ class Board:
         self._objects[(newLocation)] = object
 
         self._turn_number += 1
-        if self._turn_number > 4:
+        if self._turn_number > 7 and not ai:
             self.check_win_condition()
+        
+        # print(object.__class__.__name__," was moved to ", newLocation)
+        # print("Board state:", self._objects)
 
     def check_if_hive_valid(self ,old_loc: Location, new_loc: Location):
         removed = []
@@ -253,7 +276,7 @@ class Board:
         """
         return "\n".join([f"Position {pos}: {obj}" for pos, obj in self._objects.items()])
 
-    def checkIfvalid(self, oldLoc: Location, newLoc: Location):
+    def checkIfvalid(self, oldLoc: Location, newLoc):
         """
         Checks if the hive is still connected after every move.
         Args:
@@ -262,13 +285,16 @@ class Board:
         Returns:
             bool: True if the hive is still connected, False otherwise.
         """
+        
         newBoard = dict(self._objects)
-        del newBoard[(oldLoc)]
-        newBoard[newLoc] = 1
+        del newBoard[oldLoc]
         visited = []
 
         # test neighbours
         def checkHive(loc: Location, prev:Location):
+            # if(loc in visited):
+            #     return
+            # del newBoard[(loc)]
             visited.append(loc)
             curr_x = loc.get_x()
             curr_y = loc.get_y()
@@ -280,15 +306,33 @@ class Board:
                 if newBoard.get((current_search_loc),None) is not None:
                     checkHive(current_search_loc, loc)
             
-            del newBoard[(loc)]
+            if(loc in newBoard):
+                del newBoard[(loc)]
 
-
-        checkHive(newLoc,oldLoc)
+        
+        # Check if the ibject can leave its initial position
+        if(newLoc is None):
+            curr_x = oldLoc.get_x()
+            curr_y = oldLoc.get_y()
+            d = [(2,0),(-2,0),(1,1),(-1,1),(1,-1),(-1,-1)]
+            for (dx,dy) in d:
+                # search hive starting from first sibling
+                curr: Location = Location(curr_x+dx, curr_y+dy)
+                if newBoard.get((curr),None) is not None:
+                    checkHive(curr,curr)
+                    if(len(newBoard) == 0):
+                        return True
+                    else:
+                        return False
+        
+        checkHive(newLoc,newLoc)
         if(len(newBoard) == 0):
             return True
         else:
             return False
 
+    def canLeavePos(self, loc: Location):
+        pass
         
     
     def isSurroundedBySix(self,loc: Location):
